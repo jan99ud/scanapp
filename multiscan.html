@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>Multi Barcode Scanner</title>
+    <meta name="color-scheme" content="light dark" />
+    <style>
+        :root {
+            --bg: #0b0c10;
+            --panel: #141824;
+            --txt: #e8e8ea;
+            --muted: #a8acb3;
+            --ok: #3ddc84;
+            --warn: #ffcc00;
+            --bad: #ff4d4f;
+            --bd: #2a2f3a;
+            --btn: #1f6feb;
+            --radius: 14px;
+        }
+
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--txt);
+        }
+
+        .wrap {
+            max-width: 980px;
+            margin: auto;
+            padding: 12px;
+        }
+
+        .grid {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: 1.2fr .8fr;
+        }
+
+        @media (max-width: 900px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--bd);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .hd {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--bd);
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .hd h1,
+        .hd h2 {
+            margin: 0;
+            font-size: 18px;
+        }
+
+        .badge {
+            font-size: 12px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--bd);
+            color: var(--muted);
+        }
+
+        .badge.ok {
+            color: var(--ok);
+            border-color: rgba(61, 220, 132, .35);
+        }
+
+        .badge.warn {
+            color: var(--warn);
+            border-color: rgba(255, 204, 0, .35);
+        }
+
+        .badge.bad {
+            color: var(--bad);
+            border-color: rgba(255, 77, 79, .35);
+        }
+
+        .videoArea {
+            position: relative;
+            background: #000;
+            width: 100%;
+            aspect-ratio: 16/10;
+        }
+
+        video {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .ct {
+            padding: 12px 14px;
+            display: grid;
+            gap: 10px;
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        }
+
+        .small {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        button {
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid var(--bd);
+            background: transparent;
+            color: var(--txt);
+            font-weight: 650;
+            cursor: pointer;
+        }
+
+        button.primary {
+            background: var(--btn);
+            border-color: rgba(31, 111, 235, .45);
+        }
+
+        button:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
+        .list {
+            border: 1px solid var(--bd);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .item {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 12px;
+            border-top: 1px solid var(--bd);
+        }
+
+        .item:first-child {
+            border-top: none;
+        }
+
+        .k {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .v {
+            font-weight: 750;
+            word-break: break-all;
+        }
+
+        .pill {
+            font-size: 12px;
+            border: 1px solid var(--bd);
+            border-radius: 999px;
+            padding: 4px 8px;
+            color: var(--muted);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <div class="grid">
+
+            <div class="card">
+                <div class="hd">
+                    <h1>Scanner</h1>
+                    <div id="badge" class="badge warn">Bereit</div>
+                </div>
+                <div class="videoArea">
+                    <video id="video" playsinline muted></video>
+                </div>
+                <div class="ct">
+                    <div class="row">
+                        <button id="btnStart" class="primary">Kamera starten</button>
+                        <button id="btnStop" disabled>Stop</button>
+                        <span class="pill">Cooldown: <span id="cooldownEcho"></span>ms</span>
+                        <span class="pill">Ziel: <span id="countEcho"></span></span>
+                    </div>
+                    <div class="small mono">return: <span id="returnEcho"></span></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="hd">
+                    <h2>Ergebnis</h2>
+                    <div id="progress" class="badge warn">0/0</div>
+                </div>
+                <div class="ct">
+                    <div class="list" id="resultList"></div>
+                    <div class="row">
+                        <button id="btnUndo">Letzten entfernen</button>
+                        <button id="btnClear">Alle löschen</button>
+                        <button id="btnDone" class="primary" disabled>Fertig → Form öffnen</button>
+                    </div>
+                    <div class="small">
+                        Öffnet das Formular in einem neuen Tab mit Prefill: <span class="mono">barcode1..barcodeN</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script type="module">
+        import { BrowserMultiFormatReader } from "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm";
+
+        // DOM
+        const video = document.getElementById("video");
+        const badge = document.getElementById("badge");
+        const btnStart = document.getElementById("btnStart");
+        const btnStop = document.getElementById("btnStop");
+
+        const returnEcho = document.getElementById("returnEcho");
+        const cooldownEcho = document.getElementById("cooldownEcho");
+        const countEcho = document.getElementById("countEcho");
+
+        const progress = document.getElementById("progress");
+        const resultList = document.getElementById("resultList");
+        const btnUndo = document.getElementById("btnUndo");
+        const btnClear = document.getElementById("btnClear");
+        const btnDone = document.getElementById("btnDone");
+
+        // Config via URL
+        const qs = new URLSearchParams(location.search);
+        const returnUrl = qs.get("return") || "";
+        const count = Math.max(1, Math.min(50, Number(qs.get("count") || "1")));
+        const cooldown = Math.max(0, Number(qs.get("cooldown") || "900"));
+        const autodone = (qs.get("autodone") || "1") === "1";
+
+        returnEcho.textContent = returnUrl || "(leer)";
+        cooldownEcho.textContent = String(cooldown);
+        countEcho.textContent = String(count);
+
+        // ZXing
+        const reader = new BrowserMultiFormatReader();
+        let scanning = false;
+
+        // State
+        const values = [];
+        let lastText = "";
+        let lastTs = 0;
+
+        function setBadge(kind, text) {
+            badge.className = "badge " + kind;
+            badge.textContent = text;
+        }
+        function escapeHtml(s) {
+            return String(s)
+                .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+        }
+
+        function render() {
+            progress.textContent = `${values.length}/${count}`;
+            progress.className = "badge " + (values.length === count ? "ok" : "warn");
+
+            resultList.innerHTML = "";
+            for (let i = 0; i < count; i++) {
+                const idx = i + 1;
+                const val = values[i] || "";
+                const row = document.createElement("div");
+                row.className = "item";
+                row.innerHTML = `
+          <div>
+            <div class="k mono">barcode${idx}</div>
+            <div class="v mono">${val ? escapeHtml(val) : "<span style='opacity:.5'>—</span>"}</div>
+          </div>
+          <div class="pill">${val ? "OK" : "offen"}</div>
+        `;
+                resultList.appendChild(row);
+            }
+            btnDone.disabled = values.length === 0;
+        }
+
+        async function warmupPermission() {
+            const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+            s.getTracks().forEach(t => t.stop());
+        }
+        function pickBackCamera(devices) {
+            let selected = devices.find(d => /back|rear|environment/i.test(d.label || ""));
+            if (!selected && devices.length > 1) selected = devices[devices.length - 1];
+            if (!selected) selected = devices[0];
+            return selected;
+        }
+
+        function buildFormUrl() {
+            const u = new URL(returnUrl);
+            values.forEach((v, i) => u.searchParams.set(`barcode${i + 1}`, v));
+            return u.toString();
+        }
+
+        function openPrefilledForm() {
+            if (!returnUrl) {
+                setBadge("bad", "return fehlt");
+                return;
+            }
+            const target = buildFormUrl();
+
+            // Open the prefilled form in a new tab (your requirement)
+            window.open(target, "_blank", "noopener,noreferrer");
+
+            setBadge("ok", "Form geöffnet");
+            // Optional: stop camera after done
+            stop();
+        }
+
+        async function start() {
+            if (scanning) return;
+            if (!returnUrl) {
+                setBadge("bad", "return fehlt");
+                return;
+            }
+            if (!navigator.mediaDevices?.getUserMedia) {
+                setBadge("bad", "Browser ohne Kamera API");
+                return;
+            }
+
+            scanning = true;
+            btnStart.disabled = true;
+            btnStop.disabled = false;
+
+            try {
+                setBadge("warn", "Permission…");
+                await warmupPermission();
+
+                const devices = await BrowserMultiFormatReader.listVideoInputDevices();
+                if (!devices.length) throw new Error("Keine Kamera gefunden");
+                const selected = pickBackCamera(devices);
+
+                setBadge("ok", "Scanne…");
+                lastText = "";
+                lastTs = 0;
+
+                await reader.decodeFromVideoDevice(selected.deviceId, video, (result) => {
+                    if (!scanning) return;
+                    if (!result) return;
+
+                    const text = result.getText();
+                    const now = Date.now();
+
+                    if (text === lastText && (now - lastTs) < cooldown) return;
+                    if ((now - lastTs) < cooldown) return;
+
+                    lastText = text;
+                    lastTs = now;
+
+                    if (values.length >= count) return;
+
+                    values.push(text);
+                    render();
+
+                    if (values.length === count) {
+                        setBadge("ok", "Ziel erreicht");
+                        if (autodone) openPrefilledForm();
+                    }
+                });
+
+            } catch (e) {
+                setBadge("bad", "Kamera/Scan Fehler");
+                scanning = false;
+                btnStart.disabled = false;
+                btnStop.disabled = true;
+            }
+        }
+
+        function stop() {
+            scanning = false;
+            try { reader.reset(); } catch { }
+            try {
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(t => t.stop());
+                    video.srcObject = null;
+                }
+            } catch { }
+            btnStart.disabled = false;
+            btnStop.disabled = true;
+        }
+
+        // UI
+        btnStart.addEventListener("click", start);
+        btnStop.addEventListener("click", stop);
+        btnUndo.addEventListener("click", () => { values.pop(); render(); setBadge("warn", "Bereit"); });
+        btnClear.addEventListener("click", () => { values.length = 0; render(); setBadge("warn", "Bereit"); });
+        btnDone.addEventListener("click", openPrefilledForm);
+
+        // Init
+        render();
+        setBadge("warn", "Bereit (Start klicken)");
+    </script>
+</body>
+
+</html>

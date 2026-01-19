@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>Multi-Scan starten</title>
+    <meta name="color-scheme" content="light dark" />
+    <style>
+        :root {
+            --bg: #0b0c10;
+            --panel: #141824;
+            --txt: #e8e8ea;
+            --muted: #a8acb3;
+            --bd: #2a2f3a;
+            --btn: #1f6feb;
+        }
+
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+            background: transparent;
+            color: var(--txt);
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--bd);
+            border-radius: 14px;
+            padding: 16px;
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 16px;
+            margin: 0 0 8px 0;
+        }
+
+        p {
+            margin: 0 0 12px 0;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.35;
+        }
+
+        button {
+            width: 100%;
+            padding: 14px 14px;
+            border-radius: 14px;
+            border: 1px solid rgba(31, 111, 235, .45);
+            background: var(--btn);
+            color: var(--txt);
+            font-weight: 750;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            font-size: 12px;
+            color: var(--muted);
+            word-break: break-all;
+        }
+
+        .row {
+            margin-top: 10px;
+            display: grid;
+            gap: 8px;
+        }
+
+        a {
+            color: inherit;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <h1>Multi-Scan</h1>
+        <p>Öffnet den Scanner in einem neuen Tab (Vollbild). Nach Abschluss werden die Barcodes als Prefill in dieses
+            Formular zurückgegeben.</p>
+
+        <button id="btn">Multi-Scan öffnen</button>
+
+        <div class="row">
+            <div class="mono">return: <span id="ret"></span></div>
+            <div class="mono">count: <span id="cnt"></span></div>
+            <div class="mono">scanner: <span id="scn"></span></div>
+        </div>
+    </div>
+
+    <script>
+        const qs = new URLSearchParams(location.search);
+        const returnUrl = qs.get("return") || "";
+        const count = Math.max(1, Math.min(50, Number(qs.get("count") || "1")));
+        const cooldown = Math.max(0, Number(qs.get("cooldown") || "900"));
+
+        // change path if needed
+        const scannerBase = new URL("multiscan.html", location.href);
+
+        document.getElementById("ret").textContent = returnUrl || "(leer)";
+        document.getElementById("cnt").textContent = String(count);
+        document.getElementById("scn").textContent = scannerBase.toString();
+
+        document.getElementById("btn").addEventListener("click", () => {
+            if (!returnUrl) {
+                alert("Fehler: return-Parameter fehlt.");
+                return;
+            }
+
+            const u = new URL(scannerBase.toString());
+            u.searchParams.set("return", returnUrl);
+            u.searchParams.set("count", String(count));
+            u.searchParams.set("cooldown", String(cooldown));
+
+            // Open scanner in new tab (required for iOS camera + better UX)
+            window.open(u.toString(), "_blank", "noopener,noreferrer");
+        });
+    </script>
+</body>
+
+</html>
