@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <title>Launcher</title>
+    <title>Scan Launcher</title>
     <meta name="color-scheme" content="light dark" />
     <style>
         :root {
@@ -15,6 +15,9 @@
             --bd: #2a2f3a;
             --btn: #1f6feb;
             --ok: #3ddc84;
+            --warn: #ffcc00;
+            --bad: #ff4d4f;
+            --r: 14px;
         }
 
         body {
@@ -24,36 +27,108 @@
             color: var(--txt);
         }
 
-        .card {
-            background: var(--panel);
-            border: 1px solid var(--bd);
-            border-radius: 14px;
-            padding: 16px;
+        .wrap {
             max-width: 900px;
             margin: 0 auto;
-        }
-
-        h1 {
-            font-size: 16px;
-            margin: 0 0 8px 0;
-        }
-
-        p {
-            margin: 0 0 12px 0;
-            color: var(--muted);
-            font-size: 12px;
-            line-height: 1.35;
+            padding: 0;
         }
 
         button {
             width: 100%;
             padding: 14px 14px;
-            border-radius: 14px;
+            border-radius: var(--r);
             border: 1px solid rgba(31, 111, 235, .45);
             background: var(--btn);
             color: var(--txt);
-            font-weight: 750;
+            font-weight: 800;
             cursor: pointer;
+            font-size: 14px;
+        }
+
+        /* scan view */
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--bd);
+            border-radius: var(--r);
+            overflow: hidden;
+        }
+
+        .hd {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--bd);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .hd h1 {
+            margin: 0;
+            font-size: 14px;
+        }
+
+        .badge {
+            font-size: 12px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--bd);
+            color: var(--muted);
+        }
+
+        .badge.ok {
+            color: var(--ok);
+            border-color: rgba(61, 220, 132, .35);
+        }
+
+        .badge.warn {
+            color: var(--warn);
+            border-color: rgba(255, 204, 0, .35);
+        }
+
+        .badge.bad {
+            color: var(--bad);
+            border-color: rgba(255, 77, 79, .35);
+        }
+
+        .videoArea {
+            position: relative;
+            background: #000;
+            width: 100%;
+            aspect-ratio: 16/10;
+        }
+
+        video {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .ct {
+            padding: 12px;
+            display: grid;
+            gap: 10px;
+        }
+
+        .result {
+            border: 1px solid var(--bd);
+            border-radius: 12px;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, .02);
+        }
+
+        .label {
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+
+        .value {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            font-weight: 800;
+            word-break: break-all;
             font-size: 14px;
         }
 
@@ -61,7 +136,6 @@
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
-            margin-top: 10px;
         }
 
         .btn2 {
@@ -72,174 +146,187 @@
             border: 1px solid var(--bd);
             background: transparent;
             color: var(--txt);
-            font-weight: 650;
+            font-weight: 700;
             cursor: pointer;
         }
 
-        .mono {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        .hint {
             font-size: 12px;
             color: var(--muted);
-            word-break: break-all;
-        }
-
-        .list {
-            margin-top: 12px;
-            border: 1px solid var(--bd);
-            border-radius: 12px;
-            overflow: hidden;
-        }
-
-        .item {
-            display: flex;
-            justify-content: space-between;
-            gap: 10px;
-            padding: 10px 12px;
-            border-top: 1px solid var(--bd);
-        }
-
-        .item:first-child {
-            border-top: none;
-        }
-
-        .k {
-            color: var(--muted);
-            font-size: 12px;
-        }
-
-        .v {
-            font-weight: 750;
-            word-break: break-all;
-        }
-
-        .pill {
-            font-size: 12px;
-            border: 1px solid var(--bd);
-            border-radius: 999px;
-            padding: 4px 8px;
-            color: var(--muted);
-        }
-
-        .ok {
-            color: var(--ok);
         }
     </style>
 </head>
 
 <body>
-    <div class="card">
-        <h1>Multi-Scan</h1>
-        <p>Startet den Scanner im selben iFrame. Nach Abschluss werden die Werte gespeichert und hier angezeigt.</p>
+    <div class="wrap">
+        <!-- STATE 1: only the start button -->
+        <button id="btnStart">Scan starten</button>
 
-        <button id="btnStart">Multi-Scan starten</button>
+        <!-- STATE 2: scanner + result (hidden until start) -->
+        <div id="scanUi" class="card" style="display:none; margin-top:12px;">
+            <div class="hd">
+                <h1>Scanner</h1>
+                <div id="badge" class="badge warn">Bereit</div>
+            </div>
 
-        <div class="row">
-            <button class="btn2" id="btnCopy" type="button">Alle Werte kopieren</button>
-            <button class="btn2" id="btnClear" type="button">Ergebnis löschen</button>
+            <div class="videoArea">
+                <video id="video" playsinline muted></video>
+            </div>
+
+            <div class="ct">
+                <div id="resultBox" class="result" style="display:none;">
+                    <div class="label">Ergebnis</div>
+                    <div id="resultValue" class="value"></div>
+
+                    <div class="row" style="margin-top:10px;">
+                        <button id="btnRescan" class="btn2" type="button">Neuscannen</button>
+                        <button id="btnCopy" class="btn2" type="button">Wert kopieren</button>
+                    </div>
+
+                    <div id="copiedMsg" class="hint" style="display:none; color:var(--ok); margin-top:8px;">
+                        Kopiert.
+                    </div>
+                </div>
+
+                <div id="hint" class="hint">Nach dem Start den Barcode/QR in die Kamera halten.</div>
+            </div>
         </div>
-
-        <div class="mono" style="margin-top:10px;">
-            count: <span id="cnt"></span>
-        </div>
-
-        <div id="out" class="list" style="display:none;"></div>
-        <div id="empty" class="mono" style="margin-top:12px;">Noch keine Scans vorhanden.</div>
-
-        <div id="copyMsg" class="mono ok" style="margin-top:10px; display:none;">Kopiert.</div>
     </div>
 
-    <script>
-        const STORAGE_KEY = "scanapp:last";
-        const qs = new URLSearchParams(location.search);
-        const count = Math.max(1, Math.min(50, Number(qs.get("count") || "5")));
-        document.getElementById("cnt").textContent = String(count);
+    <script type="module">
+        import { BrowserMultiFormatReader } from "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm";
 
-        function loadResult() {
-            try {
-                const raw = sessionStorage.getItem(STORAGE_KEY);
-                return raw ? JSON.parse(raw) : null;
-            } catch {
-                return null;
-            }
+        const btnStart = document.getElementById("btnStart");
+        const scanUi = document.getElementById("scanUi");
+        const badge = document.getElementById("badge");
+        const video = document.getElementById("video");
+
+        const resultBox = document.getElementById("resultBox");
+        const resultValue = document.getElementById("resultValue");
+        const btnRescan = document.getElementById("btnRescan");
+        const btnCopy = document.getElementById("btnCopy");
+        const copiedMsg = document.getElementById("copiedMsg");
+
+        const reader = new BrowserMultiFormatReader();
+        let scanning = false;
+        let currentValue = "";
+        let lastTs = 0;
+        const COOLDOWN = 800;
+
+        function setBadge(kind, text) {
+            badge.className = "badge " + kind;
+            badge.textContent = text;
         }
 
-        function render() {
-            const out = document.getElementById("out");
-            const empty = document.getElementById("empty");
-            const res = loadResult();
+        async function warmupPermission() {
+            // iOS/iFrame: user gesture required -> call from click handler
+            const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+            s.getTracks().forEach(t => t.stop());
+        }
 
-            if (!res || !res.values || !Object.keys(res.values).length) {
-                out.style.display = "none";
-                out.innerHTML = "";
-                empty.style.display = "block";
+        function pickBackCamera(devices) {
+            // prefer labels hinting back camera
+            let selected = devices.find(d => /back|rear|environment/i.test(d.label || ""));
+            // iOS heuristic: last device often back camera
+            if (!selected && devices.length > 1) selected = devices[devices.length - 1];
+            if (!selected) selected = devices[0];
+            return selected;
+        }
+
+        function showResult(value) {
+            currentValue = value;
+            resultValue.textContent = value;
+            resultBox.style.display = "block";
+            copiedMsg.style.display = "none";
+            setBadge("ok", "Scan OK");
+        }
+
+        function stopScanner() {
+            scanning = false;
+            try { reader.reset(); } catch { }
+            try {
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(t => t.stop());
+                    video.srcObject = null;
+                }
+            } catch { }
+        }
+
+        async function startScanner() {
+            if (scanning) return;
+            if (!navigator.mediaDevices?.getUserMedia) {
+                setBadge("bad", "Browser ohne Kamera");
                 return;
             }
 
-            empty.style.display = "none";
-            out.style.display = "block";
-            out.innerHTML = "";
+            scanning = true;
+            currentValue = "";
+            resultBox.style.display = "none";
+            setBadge("warn", "Permission…");
 
-            for (let i = 1; i <= res.count; i++) {
-                const key = `barcode${i}`;
-                const val = res.values[key] || "";
-                const row = document.createElement("div");
-                row.className = "item";
-                row.innerHTML = `
-          <div>
-            <div class="k">barcode${i}</div>
-            <div class="v">${escapeHtml(val) || "<span style='opacity:.5'>—</span>"}</div>
-          </div>
-          <div class="pill">${val ? "OK" : "offen"}</div>
-        `;
-                out.appendChild(row);
-            }
-        }
-
-        function escapeHtml(s) {
-            return String(s)
-                .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
-                .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
-        }
-
-        function buildCopyText() {
-            const res = loadResult();
-            if (!res || !res.values) return "";
-            const lines = [];
-            for (let i = 1; i <= res.count; i++) {
-                const k = `barcode${i}`;
-                lines.push(`${k}: ${res.values[k] || ""}`);
-            }
-            return lines.join("\n");
-        }
-
-        document.getElementById("btnStart").addEventListener("click", () => {
-            // Navigate within same iframe
-            const u = new URL("multiscan.html", location.href);
-            u.searchParams.set("count", String(count));
-            u.searchParams.set("cooldown", qs.get("cooldown") || "900");
-            location.href = u.toString();
-        });
-
-        document.getElementById("btnClear").addEventListener("click", () => {
-            sessionStorage.removeItem(STORAGE_KEY);
-            render();
-        });
-
-        document.getElementById("btnCopy").addEventListener("click", async () => {
-            const text = buildCopyText();
-            if (!text) return;
             try {
-                await navigator.clipboard.writeText(text);
-                const msg = document.getElementById("copyMsg");
-                msg.style.display = "block";
-                setTimeout(() => msg.style.display = "none", 1200);
-            } catch {
-                // fallback: prompt
-                window.prompt("Kopiere den Text:", text);
+                await warmupPermission();
+
+                const devices = await BrowserMultiFormatReader.listVideoInputDevices();
+                if (!devices.length) {
+                    setBadge("bad", "Keine Kamera gefunden");
+                    scanning = false;
+                    return;
+                }
+
+                const selected = pickBackCamera(devices);
+                setBadge("ok", "Scanne…");
+                lastTs = 0;
+
+                await reader.decodeFromVideoDevice(selected.deviceId, video, (result) => {
+                    if (!scanning) return;
+                    if (!result) return;
+
+                    const now = Date.now();
+                    if (now - lastTs < COOLDOWN) return;
+                    lastTs = now;
+
+                    const text = result.getText();
+                    if (!text) return;
+
+                    // single-scan: stop immediately after first successful decode
+                    stopScanner();
+                    showResult(text);
+                });
+
+            } catch (e) {
+                setBadge("bad", "Kamera blockiert");
+                scanning = false;
             }
+        }
+
+        async function copyValue() {
+            if (!currentValue) return;
+            try {
+                await navigator.clipboard.writeText(currentValue);
+                copiedMsg.style.display = "block";
+                setTimeout(() => copiedMsg.style.display = "none", 1200);
+            } catch {
+                window.prompt("Kopiere den Wert:", currentValue);
+            }
+        }
+
+        // UI flow:
+        // - initially only Start button visible
+        // - after clicking Start: show scanner UI and start scanning
+        btnStart.addEventListener("click", async () => {
+            btnStart.style.display = "none";     // "nur der Knopf" im initial state
+            scanUi.style.display = "block";
+            await startScanner();
         });
 
-        render();
+        btnRescan.addEventListener("click", async () => {
+            stopScanner();
+            resultBox.style.display = "none";
+            await startScanner();
+        });
+
+        btnCopy.addEventListener("click", copyValue);
     </script>
 </body>
 
