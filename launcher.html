@@ -33,7 +33,8 @@
             padding: 0;
         }
 
-        button {
+        /* Initial: ONLY Start button */
+        #btnStart {
             width: 100%;
             padding: 14px 14px;
             border-radius: var(--r);
@@ -45,7 +46,7 @@
             font-size: 14px;
         }
 
-        /* scan view */
+        /* Scan UI */
         .card {
             background: var(--panel);
             border: 1px solid var(--bd);
@@ -154,26 +155,32 @@
             font-size: 12px;
             color: var(--muted);
         }
+
+        .oktext {
+            color: var(--ok);
+        }
     </style>
 </head>
 
 <body>
     <div class="wrap">
         <!-- STATE 1: only the start button -->
-        <button id="btnStart">Scan starten</button>
+        <button id="btnStart" type="button">Scan starten</button>
 
-        <!-- STATE 2: scanner + result (hidden until start) -->
+        <!-- STATE 2: scanner UI (hidden until start) -->
         <div id="scanUi" class="card" style="display:none; margin-top:12px;">
             <div class="hd">
                 <h1>Scanner</h1>
                 <div id="badge" class="badge warn">Bereit</div>
             </div>
 
-            <div class="videoArea">
+            <!-- Camera area (will be hidden after successful scan) -->
+            <div id="videoArea" class="videoArea">
                 <video id="video" playsinline muted></video>
             </div>
 
             <div class="ct">
+                <!-- Result area (only visible after scan) -->
                 <div id="resultBox" class="result" style="display:none;">
                     <div class="label">Ergebnis</div>
                     <div id="resultValue" class="value"></div>
@@ -183,7 +190,7 @@
                         <button id="btnCopy" class="btn2" type="button">Wert kopieren</button>
                     </div>
 
-                    <div id="copiedMsg" class="hint" style="display:none; color:var(--ok); margin-top:8px;">
+                    <div id="copiedMsg" class="hint oktext" style="display:none; margin-top:8px;">
                         Kopiert.
                     </div>
                 </div>
@@ -199,6 +206,8 @@
         const btnStart = document.getElementById("btnStart");
         const scanUi = document.getElementById("scanUi");
         const badge = document.getElementById("badge");
+
+        const videoArea = document.getElementById("videoArea");
         const video = document.getElementById("video");
 
         const resultBox = document.getElementById("resultBox");
@@ -225,20 +234,10 @@
         }
 
         function pickBackCamera(devices) {
-            // prefer labels hinting back camera
             let selected = devices.find(d => /back|rear|environment/i.test(d.label || ""));
-            // iOS heuristic: last device often back camera
             if (!selected && devices.length > 1) selected = devices[devices.length - 1];
             if (!selected) selected = devices[0];
             return selected;
-        }
-
-        function showResult(value) {
-            currentValue = value;
-            resultValue.textContent = value;
-            resultBox.style.display = "block";
-            copiedMsg.style.display = "none";
-            setBadge("ok", "Scan OK");
         }
 
         function stopScanner() {
@@ -252,6 +251,41 @@
             } catch { }
         }
 
+        async function copyValue(auto = false) {
+            if (!currentValue) return false;
+
+            try {
+                await navigator.clipboard.writeText(currentValue);
+                copiedMsg.style.display = "block";
+                if (!auto) {
+                    setTimeout(() => copiedMsg.style.display = "none", 1200);
+                } else {
+                    // Keep it visible a bit longer for auto-copy feedback
+                    setTimeout(() => copiedMsg.style.display = "none", 1600);
+                }
+                return true;
+            } catch {
+                if (!auto) {
+                    window.prompt("Kopiere den Wert:", currentValue);
+                }
+                return false;
+            }
+        }
+
+        async function showResult(value) {
+            currentValue = value;
+            resultValue.textContent = value;
+
+            // Hide camera after scan; show result + buttons only
+            videoArea.style.display = "none";
+            resultBox.style.display = "block";
+            copiedMsg.style.display = "none";
+            setBadge("ok", "Scan OK");
+
+            // Auto-copy on successful scan
+            await copyValue(true);
+        }
+
         async function startScanner() {
             if (scanning) return;
             if (!navigator.mediaDevices?.getUserMedia) {
@@ -262,6 +296,7 @@
             scanning = true;
             currentValue = "";
             resultBox.style.display = "none";
+            copiedMsg.style.display = "none";
             setBadge("warn", "Permission…");
 
             try {
@@ -275,6 +310,10 @@
                 }
 
                 const selected = pickBackCamera(devices);
+
+                // Ensure camera area is visible while scanning
+                videoArea.style.display = "block";
+
                 setBadge("ok", "Scanne…");
                 lastTs = 0;
 
@@ -289,8 +328,9 @@
                     const text = result.getText();
                     if (!text) return;
 
-                    // single-scan: stop immediately after first successful decode
+                    // Single-scan: stop immediately after first successful decode
                     stopScanner();
+                    // showResult is async; we can call and ignore promise here safely
                     showResult(text);
                 });
 
@@ -300,33 +340,28 @@
             }
         }
 
-        async function copyValue() {
-            if (!currentValue) return;
-            try {
-                await navigator.clipboard.writeText(currentValue);
-                copiedMsg.style.display = "block";
-                setTimeout(() => copiedMsg.style.display = "none", 1200);
-            } catch {
-                window.prompt("Kopiere den Wert:", currentValue);
-            }
-        }
-
         // UI flow:
-        // - initially only Start button visible
-        // - after clicking Start: show scanner UI and start scanning
+        // Initial: only start button
+        // After click: show scan UI and start scanning
         btnStart.addEventListener("click", async () => {
-            btnStart.style.display = "none";     // "nur der Knopf" im initial state
+            btnStart.style.display = "none";
             scanUi.style.display = "block";
             await startScanner();
         });
 
+        // Rescan: hide result, show camera, scan again
         btnRescan.addEventListener("click", async () => {
             stopScanner();
             resultBox.style.display = "none";
+            copiedMsg.style.display = "none";
+            videoArea.style.display = "block";
             await startScanner();
         });
 
-        btnCopy.addEventListener("click", copyValue);
+        // Manual copy
+        btnCopy.addEventListener("click", async () => {
+            await copyValue(false);
+        });
     </script>
 </body>
 
