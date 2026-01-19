@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <title>Multi Barcode Scanner</title>
+    <title>MultiScan</title>
     <meta name="color-scheme" content="light dark" />
     <style>
         :root {
@@ -205,7 +205,8 @@
                         <span class="pill">Cooldown: <span id="cooldownEcho"></span>ms</span>
                         <span class="pill">Ziel: <span id="countEcho"></span></span>
                     </div>
-                    <div class="small mono">return: <span id="returnEcho"></span></div>
+                    <div class="small mono">Hinweis: Nach „Fertig“ wird gespeichert und zum Launcher zurück gewechselt.
+                    </div>
                 </div>
             </div>
 
@@ -219,10 +220,7 @@
                     <div class="row">
                         <button id="btnUndo">Letzten entfernen</button>
                         <button id="btnClear">Alle löschen</button>
-                        <button id="btnDone" class="primary" disabled>Fertig → Form öffnen</button>
-                    </div>
-                    <div class="small">
-                        Öffnet das Formular in einem neuen Tab mit Prefill: <span class="mono">barcode1..barcodeN</span>
+                        <button id="btnDone" class="primary" disabled>Fertig</button>
                     </div>
                 </div>
             </div>
@@ -233,38 +231,30 @@
     <script type="module">
         import { BrowserMultiFormatReader } from "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm";
 
-        // DOM
+        const STORAGE_KEY = "scanapp:last";
+
         const video = document.getElementById("video");
         const badge = document.getElementById("badge");
         const btnStart = document.getElementById("btnStart");
         const btnStop = document.getElementById("btnStop");
-
-        const returnEcho = document.getElementById("returnEcho");
-        const cooldownEcho = document.getElementById("cooldownEcho");
-        const countEcho = document.getElementById("countEcho");
-
         const progress = document.getElementById("progress");
         const resultList = document.getElementById("resultList");
         const btnUndo = document.getElementById("btnUndo");
         const btnClear = document.getElementById("btnClear");
         const btnDone = document.getElementById("btnDone");
+        const cooldownEcho = document.getElementById("cooldownEcho");
+        const countEcho = document.getElementById("countEcho");
 
-        // Config via URL
         const qs = new URLSearchParams(location.search);
-        const returnUrl = qs.get("return") || "";
-        const count = Math.max(1, Math.min(50, Number(qs.get("count") || "1")));
+        const count = Math.max(1, Math.min(50, Number(qs.get("count") || "5")));
         const cooldown = Math.max(0, Number(qs.get("cooldown") || "900"));
-        const autodone = (qs.get("autodone") || "1") === "1";
 
-        returnEcho.textContent = returnUrl || "(leer)";
         cooldownEcho.textContent = String(cooldown);
         countEcho.textContent = String(count);
 
-        // ZXing
         const reader = new BrowserMultiFormatReader();
         let scanning = false;
 
-        // State
         const values = [];
         let lastText = "";
         let lastTs = 0;
@@ -273,6 +263,7 @@
             badge.className = "badge " + kind;
             badge.textContent = text;
         }
+
         function escapeHtml(s) {
             return String(s)
                 .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
@@ -298,13 +289,28 @@
         `;
                 resultList.appendChild(row);
             }
+
             btnDone.disabled = values.length === 0;
+        }
+
+        function saveToSession() {
+            const obj = {};
+            values.forEach((v, i) => obj[`barcode${i + 1}`] = v);
+
+            const payload = {
+                ts: Date.now(),
+                count,
+                values: obj
+            };
+
+            sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
         }
 
         async function warmupPermission() {
             const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
             s.getTracks().forEach(t => t.stop());
         }
+
         function pickBackCamera(devices) {
             let selected = devices.find(d => /back|rear|environment/i.test(d.label || ""));
             if (!selected && devices.length > 1) selected = devices[devices.length - 1];
@@ -312,33 +318,8 @@
             return selected;
         }
 
-        function buildFormUrl() {
-            const u = new URL(returnUrl);
-            values.forEach((v, i) => u.searchParams.set(`barcode${i + 1}`, v));
-            return u.toString();
-        }
-
-        function openPrefilledForm() {
-            if (!returnUrl) {
-                setBadge("bad", "return fehlt");
-                return;
-            }
-            const target = buildFormUrl();
-
-            // Open the prefilled form in a new tab (your requirement)
-            window.open(target, "_blank", "noopener,noreferrer");
-
-            setBadge("ok", "Form geöffnet");
-            // Optional: stop camera after done
-            stop();
-        }
-
         async function start() {
             if (scanning) return;
-            if (!returnUrl) {
-                setBadge("bad", "return fehlt");
-                return;
-            }
             if (!navigator.mediaDevices?.getUserMedia) {
                 setBadge("bad", "Browser ohne Kamera API");
                 return;
@@ -380,7 +361,6 @@
 
                     if (values.length === count) {
                         setBadge("ok", "Ziel erreicht");
-                        if (autodone) openPrefilledForm();
                     }
                 });
 
@@ -403,16 +383,34 @@
             } catch { }
             btnStart.disabled = false;
             btnStop.disabled = true;
+            setBadge("warn", "Gestoppt");
         }
 
-        // UI
         btnStart.addEventListener("click", start);
         btnStop.addEventListener("click", stop);
-        btnUndo.addEventListener("click", () => { values.pop(); render(); setBadge("warn", "Bereit"); });
-        btnClear.addEventListener("click", () => { values.length = 0; render(); setBadge("warn", "Bereit"); });
-        btnDone.addEventListener("click", openPrefilledForm);
 
-        // Init
+        btnUndo.addEventListener("click", () => {
+            values.pop();
+            render();
+            setBadge("warn", "Bereit");
+        });
+
+        btnClear.addEventListener("click", () => {
+            values.length = 0;
+            render();
+            setBadge("warn", "Bereit");
+        });
+
+        btnDone.addEventListener("click", () => {
+            saveToSession();
+            stop();
+
+            // Navigate back to launcher within same iframe
+            const u = new URL("launcher.html", location.href);
+            u.searchParams.set("count", String(count));
+            location.href = u.toString();
+        });
+
         render();
         setBadge("warn", "Bereit (Start klicken)");
     </script>
