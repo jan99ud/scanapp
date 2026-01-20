@@ -108,7 +108,6 @@
             object-fit: cover;
         }
 
-        /* simple targeting box hint */
         .aim {
             position: absolute;
             inset: 0;
@@ -216,17 +215,12 @@
                     <div id="copiedMsg" class="hint oktext" style="display:none; margin-top:8px;">Kopiert.</div>
                 </div>
 
-                <div class="hint">
-                    Tipp: Code möglichst mittig im Rahmen, Abstand 10–25 cm, kurz ruhig halten.
-                </div>
+                <div class="hint">Tipp: Code mittig im Rahmen, kurz ruhig halten.</div>
             </div>
         </div>
     </div>
 
     <script type="module">
-        import { BrowserMultiFormatReader } from "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm";
-        import { DecodeHintType, BarcodeFormat } from "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/+esm";
-
         const btnStart = document.getElementById("btnStart");
         const scanUi = document.getElementById("scanUi");
         const badge = document.getElementById("badge");
@@ -245,10 +239,8 @@
         let busy = false;
         let currentValue = "";
 
-        // throttle: native detector can run fast; we keep it controlled
         const DETECT_INTERVAL_MS = 90;
 
-        // Offscreen canvas for center-crop detection (big win)
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
@@ -262,17 +254,12 @@
             btnCopy.disabled = disabled;
         }
 
-        function stopAll() {
-            scanning = false;
-            try {
-                if (stream) {
-                    stream.getTracks().forEach(t => t.stop());
-                    stream = null;
-                }
-                if (video.srcObject) video.srcObject = null;
-            } catch { }
-            // ZXing reader cleanup if used
-            try { zxing?.reset?.(); } catch { }
+        function hasNativeDetector() {
+            return typeof window.BarcodeDetector === "function";
+        }
+
+        function buildNativeFormats() {
+            return ["qr_code", "code_128", "code_39", "ean_13", "ean_8", "itf", "upc_a", "upc_e", "data_matrix"];
         }
 
         async function copyValue(auto = false) {
@@ -292,7 +279,6 @@
             currentValue = value;
             resultValue.textContent = value;
 
-            // hide camera; show only result + buttons
             videoArea.style.display = "none";
             resultBox.style.display = "block";
             copiedMsg.style.display = "none";
@@ -301,15 +287,40 @@
             await copyValue(true);
         }
 
+        async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
         async function waitForVideoReady(timeoutMs = 2500) {
             const start = Date.now();
-            while (video.readyState < 2) { // HAVE_CURRENT_DATA
+            while (video.readyState < 2) {
                 if (Date.now() - start > timeoutMs) break;
-                await new Promise(r => setTimeout(r, 50));
+                await sleep(50);
             }
         }
 
-        // Best effort: request continuous focus if supported (Android)
+        // IMPORTANT: strong cleanup for Android WebViews
+        async function hardReleaseCamera() {
+            scanning = false;
+
+            try {
+                if (stream) {
+                    // stop tracks
+                    for (const t of stream.getTracks()) t.stop();
+                    stream = null;
+                }
+            } catch { }
+
+            try {
+                // detach video
+                video.pause();
+                video.srcObject = null;
+                video.removeAttribute("src");
+                video.load(); // forces media element reset in Chromium
+            } catch { }
+
+            // Give Android camera stack time to release
+            await sleep(180);
+        }
+
         async function tryContinuousFocus() {
             try {
                 const track = stream?.getVideoTracks?.()?.[0];
@@ -320,56 +331,97 @@
             } catch { }
         }
 
-        // Native BarcodeDetector (fast on Android/Chromium)
-        function hasNativeDetector() {
-            return typeof window.BarcodeDetector === "function";
-        }
-
-        function buildNativeFormats() {
-            // Keep this list tight for speed and fewer false negatives.
-            // If you KNOW your types, remove the ones you don't use.
-            return [
-                "qr_code",
-                "code_128",
-                "code_39",
-                "ean_13",
-                "ean_8",
-                "itf",
-                "upc_a",
-                "upc_e",
-                "data_matrix"
+        async function getStreamWithRetries() {
+            // Constraint ladder (start reasonable, then relax)
+            const tries = [
+                {
+                    name: "720p@30",
+                    constraints: {
+                        video: {
+                            facingMode: { ideal: "environment" },
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 },
+                            frameRate: { ideal: 30, max: 30 }
+                        },
+                        audio: false
+                    }
+                },
+                {
+                    name: "720p",
+                    constraints: {
+                        video: {
+                            facingMode: { ideal: "environment" },
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 }
+                        },
+                        audio: false
+                    }
+                },
+                {
+                    name: "minimal",
+                    constraints: { video: { facingMode: { ideal: "environment" } }, audio: false }
+                }
             ];
+
+            // Backoff ladder for NotReadableError (camera busy)
+            const backoff = [0, 200, 450, 800];
+
+            let lastErr = null;
+
+            for (const attempt of tries) {
+                for (let i = 0; i < backoff.length; i++) {
+                    try {
+                        if (backoff[i]) await sleep(backoff[i]);
+                        setBadge("warn", `Kamera startet (${attempt.name})…`);
+
+                        const s = await navigator.mediaDevices.getUserMedia(attempt.constraints);
+                        return s;
+
+                    } catch (e) {
+                        lastErr = e;
+                        const n = (e?.name || "").toLowerCase();
+
+                        // NotReadableError: retry with backoff (same constraints) before relaxing
+                        if (n.includes("notreadable")) {
+                            await hardReleaseCamera();
+                            continue;
+                        }
+
+                        // OverconstrainedError: move to next constraints
+                        if (n.includes("overconstrained")) {
+                            await hardReleaseCamera();
+                            break;
+                        }
+
+                        // NotAllowed/Security: no point retrying much
+                        await hardReleaseCamera();
+                        throw e;
+                    }
+                }
+            }
+
+            throw lastErr || new Error("Unknown camera error");
         }
 
         async function nativeScanLoop() {
-            const formats = buildNativeFormats();
             let detector;
-
-            try {
-                detector = new BarcodeDetector({ formats });
-            } catch {
-                detector = new BarcodeDetector();
-            }
+            try { detector = new BarcodeDetector({ formats: buildNativeFormats() }); }
+            catch { detector = new BarcodeDetector(); }
 
             let lastRun = 0;
 
             while (scanning) {
                 const now = Date.now();
                 if (now - lastRun < DETECT_INTERVAL_MS) {
-                    await new Promise(r => setTimeout(r, 20));
+                    await sleep(20);
                     continue;
                 }
                 lastRun = now;
 
-                // Ensure we have dimensions
                 const vw = video.videoWidth || 0;
                 const vh = video.videoHeight || 0;
-                if (!vw || !vh) {
-                    await new Promise(r => setTimeout(r, 50));
-                    continue;
-                }
+                if (!vw || !vh) { await sleep(50); continue; }
 
-                // Center crop (70% width, 55% height) to match UI box.
                 const cropW = Math.floor(vw * 0.70);
                 const cropH = Math.floor(vh * 0.55);
                 const sx = Math.floor((vw - cropW) / 2);
@@ -384,49 +436,15 @@
                     if (codes && codes.length) {
                         const raw = (codes[0].rawValue || "").trim();
                         if (raw) {
-                            stopAll();
+                            await hardReleaseCamera();
                             await showResult(raw);
                             return;
                         }
                     }
                 } catch {
-                    // ignore frame errors; loop continues
+                    // ignore frame errors
                 }
             }
-        }
-
-        // ZXing fallback (slower in some Android WebViews)
-        let zxing = null;
-        async function zxingStart() {
-            // Restrict formats for speed (adjust to your reality)
-            const hints = new Map();
-            hints.set(DecodeHintType.TRY_HARDER, true);
-            hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-                BarcodeFormat.QR_CODE,
-                BarcodeFormat.CODE_128,
-                BarcodeFormat.CODE_39,
-                BarcodeFormat.EAN_13,
-                BarcodeFormat.EAN_8,
-                BarcodeFormat.ITF,
-                BarcodeFormat.UPC_A,
-                BarcodeFormat.UPC_E,
-                BarcodeFormat.DATA_MATRIX
-            ]);
-
-            zxing = new BrowserMultiFormatReader(hints);
-
-            // Do NOT await forever; start and handle result in callback
-            zxing.decodeFromVideoElement(video, (result) => {
-                if (!scanning) return;
-                if (!result) return;
-                const text = (result.getText?.() || "").trim();
-                if (!text) return;
-
-                stopAll();
-                showResult(text);
-            }).catch((e) => {
-                setBadge("bad", `Decoder Fehler: ${e?.name || "Unknown"}`);
-            });
         }
 
         async function startScanner() {
@@ -442,7 +460,7 @@
                 videoArea.style.display = "block";
                 setBadge("warn", "Kamera startet…");
 
-                stopAll();
+                await hardReleaseCamera();
                 scanning = true;
                 currentValue = "";
 
@@ -452,18 +470,9 @@
                     return;
                 }
 
-                // Constraints: good quality but not too strict (Android-friendly)
-                const constraints = {
-                    video: {
-                        facingMode: { ideal: "environment" },
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 },
-                        frameRate: { ideal: 30, max: 30 }
-                    },
-                    audio: false
-                };
+                // Get stream with retries/backoff (fix NotReadableError)
+                stream = await getStreamWithRetries();
 
-                stream = await navigator.mediaDevices.getUserMedia(constraints);
                 video.srcObject = stream;
                 video.setAttribute("playsinline", "true");
                 video.muted = true;
@@ -471,19 +480,19 @@
                 await waitForVideoReady(2500);
                 await tryContinuousFocus();
 
-                // Prefer native detector on Android (much faster)
                 if (hasNativeDetector()) {
                     setBadge("ok", "Scanne (native) …");
-                    nativeScanLoop(); // fire-and-forget
+                    nativeScanLoop(); // run loop
                 } else {
-                    setBadge("ok", "Scanne …");
-                    await zxingStart();
+                    setBadge("bad", "Kein nativer Detector");
+                    scanning = false;
                 }
 
             } catch (e) {
                 const name = e?.name || "UnknownError";
                 setBadge("bad", `Kamera/Scan Fehler: ${name}`);
                 scanning = false;
+                await hardReleaseCamera();
             } finally {
                 setButtonsDisabled(false);
                 busy = false;
