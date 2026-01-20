@@ -6,7 +6,6 @@
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
     <title>Scan Launcher</title>
     <style>
-        /* Mobile iFrame: prevent forced dark background */
         html,
         body {
             background: transparent !important;
@@ -37,7 +36,6 @@
             padding: 0;
         }
 
-        /* Initial state: ONLY Start button */
         #btnStart {
             width: 100%;
             padding: 14px 14px;
@@ -50,7 +48,6 @@
             font-size: 14px;
         }
 
-        /* Scanner UI */
         .card {
             background: var(--panel);
             border: 1px solid var(--bd);
@@ -168,28 +165,35 @@
         .oktext {
             color: var(--ok);
         }
+
+        .diag {
+            border: 1px dashed rgba(255, 255, 255, .15);
+            border-radius: 12px;
+            padding: 10px 12px;
+            font-size: 12px;
+            color: var(--muted);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            word-break: break-word;
+            display: none;
+        }
     </style>
 </head>
 
 <body>
     <div class="wrap">
-        <!-- STATE 1: only the start button -->
         <button id="btnStart" type="button">Scan starten</button>
 
-        <!-- STATE 2: scanner UI (hidden until start) -->
         <div id="scanUi" class="card" style="display:none; margin-top:12px;">
             <div class="hd">
                 <h1>Scanner</h1>
                 <div id="badge" class="badge warn">Bereit</div>
             </div>
 
-            <!-- Camera area (hidden after successful scan) -->
             <div id="videoArea" class="videoArea">
                 <video id="video" playsinline muted></video>
             </div>
 
             <div class="ct">
-                <!-- Result area (visible after scan). While result is shown, camera stays hidden. -->
                 <div id="resultBox" class="result" style="display:none;">
                     <div class="label">Ergebnis</div>
                     <div id="resultValue" class="value"></div>
@@ -199,11 +203,10 @@
                         <button id="btnCopy" class="btn2" type="button">Wert kopieren</button>
                     </div>
 
-                    <div id="copiedMsg" class="hint oktext" style="display:none; margin-top:8px;">
-                        Kopiert.
-                    </div>
+                    <div id="copiedMsg" class="hint oktext" style="display:none; margin-top:8px;">Kopiert.</div>
                 </div>
 
+                <div id="diag" class="diag"></div>
                 <div class="hint">Hinweis: Nach dem Scan wird der Wert automatisch kopiert.</div>
             </div>
         </div>
@@ -213,10 +216,8 @@
         import { BrowserMultiFormatReader } from "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm";
         import { DecodeHintType } from "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/+esm";
 
-        // Improve decoding reliability (especially Android)
         const hints = new Map();
         hints.set(DecodeHintType.TRY_HARDER, true);
-
         const reader = new BrowserMultiFormatReader(hints);
 
         const btnStart = document.getElementById("btnStart");
@@ -232,17 +233,28 @@
         const btnCopy = document.getElementById("btnCopy");
         const copiedMsg = document.getElementById("copiedMsg");
 
+        const diag = document.getElementById("diag");
+
         let stream = null;
         let scanning = false;
-        let busy = false;           // prevents double start/stop races
+        let busy = false;
         let currentValue = "";
         let lastTs = 0;
-
         const COOLDOWN = 700;
 
         function setBadge(kind, text) {
             badge.className = "badge " + kind;
             badge.textContent = text;
+        }
+
+        function showDiag(text) {
+            diag.style.display = "block";
+            diag.textContent = text;
+        }
+
+        function hideDiag() {
+            diag.style.display = "none";
+            diag.textContent = "";
         }
 
         function setButtonsDisabled(disabled) {
@@ -252,9 +264,7 @@
 
         function stopScanner() {
             scanning = false;
-
             try { reader.reset(); } catch { }
-
             try {
                 if (stream) {
                     stream.getTracks().forEach(t => t.stop());
@@ -266,7 +276,6 @@
 
         async function copyValue(auto = false) {
             if (!currentValue) return false;
-
             try {
                 await navigator.clipboard.writeText(currentValue);
                 copiedMsg.style.display = "block";
@@ -282,15 +291,26 @@
             currentValue = value;
             resultValue.textContent = value;
 
-            // Hide camera; show only value + buttons
             videoArea.style.display = "none";
             resultBox.style.display = "block";
             copiedMsg.style.display = "none";
 
             setBadge("ok", "Scan OK");
-
-            // Auto-copy after scan
             await copyValue(true);
+        }
+
+        function errText(e) {
+            const name = e?.name || "UnknownError";
+            const msg = e?.message || String(e || "");
+            return `${name}: ${msg}`;
+        }
+
+        async function waitForVideoReady(timeoutMs = 2500) {
+            const start = Date.now();
+            while (video.readyState < 2) { // HAVE_CURRENT_DATA
+                if (Date.now() - start > timeoutMs) break;
+                await new Promise(r => setTimeout(r, 50));
+            }
         }
 
         async function startScanner() {
@@ -298,14 +318,16 @@
             busy = true;
 
             try {
+                hideDiag();
                 setButtonsDisabled(true);
 
                 if (!navigator.mediaDevices?.getUserMedia) {
                     setBadge("bad", "Browser ohne Kamera");
+                    showDiag("navigator.mediaDevices.getUserMedia ist nicht verfuegbar.");
                     return;
                 }
 
-                // Always do a clean stop before starting again (Android "camera busy" fix)
+                // Hard clean stop first (Android camera busy)
                 stopScanner();
 
                 scanning = true;
@@ -313,11 +335,9 @@
                 resultBox.style.display = "none";
                 copiedMsg.style.display = "none";
 
-                // Ensure camera area is visible while scanning
                 videoArea.style.display = "block";
                 setBadge("warn", "Kamera startet…");
 
-                // Constraint fallback ladder (Android-friendly)
                 const attempts = [
                     {
                         name: "1080p@30",
@@ -359,25 +379,29 @@
 
                         stream = await navigator.mediaDevices.getUserMedia(attempt.constraints);
 
-                        // Try continuous focus where supported (best effort)
+                        // Best effort: continuous focus
                         try {
                             const track = stream.getVideoTracks()?.[0];
                             const caps = track?.getCapabilities?.();
                             if (caps?.focusMode?.includes?.("continuous")) {
                                 await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
                             }
-                        } catch { /* ignore */ }
+                        } catch { }
 
                         video.srcObject = stream;
                         video.setAttribute("playsinline", "true");
                         video.muted = true;
+
+                        // Some Android WebViews need explicit play and a short readiness wait
                         await video.play();
+                        await waitForVideoReady(2500);
 
                         setBadge("ok", "Scanne…");
                         lastTs = 0;
 
-                        // Decode directly from the video element (more reliable on Android WebViews)
-                        await reader.decodeFromVideoElement(video, (result) => {
+                        // IMPORTANT ANDROID FIX:
+                        // Do NOT await the long-running promise. Start decoding and let it run until reset/stop.
+                        reader.decodeFromVideoElement(video, (result) => {
                             if (!scanning) return;
                             if (!result) return;
 
@@ -388,42 +412,36 @@
                             const text = result.getText();
                             if (!text) return;
 
-                            // Single scan: stop immediately
                             stopScanner();
-                            // show result (async), do not block callback
                             showResult(text);
+                        }).catch((e) => {
+                            // If decode init fails in WebView, surface it
+                            lastError = e;
+                            console.log("decodeFromVideoElement failed:", e?.name, e?.message, e);
+                            setBadge("bad", `Decoder Fehler: ${e?.name || "Unknown"}`);
+                            showDiag(`Decoder Fehler (${attempt.name}): ${errText(e)}`);
                         });
 
-                        // If decodeFromVideoElement resolves unexpectedly, stop here.
+                        // If we got here, the decoder is running; exit startScanner successfully.
                         return;
 
                     } catch (e) {
                         lastError = e;
-                        console.log(`[Scanner Attempt Failed: ${attempt.name}]`, e?.name, e?.message, e);
+                        console.log(`[Camera Attempt Failed: ${attempt.name}]`, e?.name, e?.message, e);
 
-                        // Clean up after failed attempt (prevents "busy" on next attempt)
                         stopScanner();
 
-                        // Retry only for constraint/camera-busy type issues
                         const n = (e?.name || "").toLowerCase();
-                        if (
-                            n.includes("overconstrained") ||
-                            n.includes("notreadable") ||
-                            n.includes("abort")
-                        ) {
+                        if (n.includes("overconstrained") || n.includes("notreadable") || n.includes("abort")) {
                             continue;
                         }
-
-                        // For NotAllowedError / SecurityError etc., retrying won't help much
                         break;
                     }
                 }
 
-                // All attempts failed
-                const name = lastError?.name || "UnknownError";
-                const msg = lastError?.message || String(lastError || "");
-                setBadge("bad", `Kamera/Scan Fehler: ${name}`);
-                console.log("Final camera error:", name, msg, lastError);
+                const finalName = lastError?.name || "UnknownError";
+                setBadge("bad", `Kamera/Scan Fehler: ${finalName}`);
+                showDiag(`Final: ${errText(lastError)}\nUserAgent: ${navigator.userAgent}`);
 
             } finally {
                 setButtonsDisabled(false);
@@ -431,21 +449,18 @@
             }
         }
 
-        // Start flow: initial only start button; after click show UI and scan
         btnStart.addEventListener("click", async () => {
             btnStart.style.display = "none";
             scanUi.style.display = "block";
             await startScanner();
         });
 
-        // Rescan: fix race conditions, do a clean restart
         btnRescan.addEventListener("click", async () => {
             if (busy) return;
             stopScanner();
             await startScanner();
         });
 
-        // Manual copy
         btnCopy.addEventListener("click", async () => {
             await copyValue(false);
         });
