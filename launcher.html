@@ -305,6 +305,9 @@
                     return;
                 }
 
+                // Always do a clean stop before starting again (Android "camera busy" fix)
+                stopScanner();
+
                 scanning = true;
                 currentValue = "";
                 resultBox.style.display = "none";
@@ -314,59 +317,114 @@
                 videoArea.style.display = "block";
                 setBadge("warn", "Kamera startet…");
 
-                // Android-stable high-quality constraints
-                const constraints = {
-                    video: {
-                        facingMode: { ideal: "environment" },
-                        width: { ideal: 1920 },
-                        height: { ideal: 1080 },
-                        frameRate: { ideal: 30, max: 30 }
+                // Constraint fallback ladder (Android-friendly)
+                const attempts = [
+                    {
+                        name: "1080p@30",
+                        constraints: {
+                            video: {
+                                facingMode: { ideal: "environment" },
+                                width: { ideal: 1920 },
+                                height: { ideal: 1080 },
+                                frameRate: { ideal: 30, max: 30 }
+                            },
+                            audio: false
+                        }
                     },
-                    audio: false
-                };
-
-                // Get stream once and bind it to the <video>
-                stream = await navigator.mediaDevices.getUserMedia(constraints);
-
-                // Try continuous focus where supported (Android devices)
-                try {
-                    const track = stream.getVideoTracks()?.[0];
-                    const caps = track?.getCapabilities?.();
-                    if (caps?.focusMode?.includes?.("continuous")) {
-                        await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+                    {
+                        name: "720p",
+                        constraints: {
+                            video: {
+                                facingMode: { ideal: "environment" },
+                                width: { ideal: 1280 },
+                                height: { ideal: 720 }
+                            },
+                            audio: false
+                        }
+                    },
+                    {
+                        name: "minimal",
+                        constraints: {
+                            video: { facingMode: { ideal: "environment" } },
+                            audio: false
+                        }
                     }
-                } catch { /* ignore */ }
+                ];
 
-                video.srcObject = stream;
-                video.setAttribute("playsinline", "true");
-                video.muted = true;
-                await video.play();
+                let lastError = null;
 
-                setBadge("ok", "Scanne…");
-                lastTs = 0;
+                for (const attempt of attempts) {
+                    try {
+                        setBadge("warn", `Kamera startet (${attempt.name})…`);
 
-                // Decode directly from the video element (more reliable on Android WebViews)
-                await reader.decodeFromVideoElement(video, (result) => {
-                    if (!scanning) return;
-                    if (!result) return;
+                        stream = await navigator.mediaDevices.getUserMedia(attempt.constraints);
 
-                    const now = Date.now();
-                    if (now - lastTs < COOLDOWN) return;
-                    lastTs = now;
+                        // Try continuous focus where supported (best effort)
+                        try {
+                            const track = stream.getVideoTracks()?.[0];
+                            const caps = track?.getCapabilities?.();
+                            if (caps?.focusMode?.includes?.("continuous")) {
+                                await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+                            }
+                        } catch { /* ignore */ }
 
-                    const text = result.getText();
-                    if (!text) return;
+                        video.srcObject = stream;
+                        video.setAttribute("playsinline", "true");
+                        video.muted = true;
+                        await video.play();
 
-                    // Single scan: stop immediately
-                    stopScanner();
-                    // show result (async), do not block callback
-                    showResult(text);
-                });
+                        setBadge("ok", "Scanne…");
+                        lastTs = 0;
 
-            } catch (e) {
-                console.log("Scanner error:", e?.name, e?.message, e);
-                setBadge("bad", "Kamera/Scan Fehler");
-                scanning = false;
+                        // Decode directly from the video element (more reliable on Android WebViews)
+                        await reader.decodeFromVideoElement(video, (result) => {
+                            if (!scanning) return;
+                            if (!result) return;
+
+                            const now = Date.now();
+                            if (now - lastTs < COOLDOWN) return;
+                            lastTs = now;
+
+                            const text = result.getText();
+                            if (!text) return;
+
+                            // Single scan: stop immediately
+                            stopScanner();
+                            // show result (async), do not block callback
+                            showResult(text);
+                        });
+
+                        // If decodeFromVideoElement resolves unexpectedly, stop here.
+                        return;
+
+                    } catch (e) {
+                        lastError = e;
+                        console.log(`[Scanner Attempt Failed: ${attempt.name}]`, e?.name, e?.message, e);
+
+                        // Clean up after failed attempt (prevents "busy" on next attempt)
+                        stopScanner();
+
+                        // Retry only for constraint/camera-busy type issues
+                        const n = (e?.name || "").toLowerCase();
+                        if (
+                            n.includes("overconstrained") ||
+                            n.includes("notreadable") ||
+                            n.includes("abort")
+                        ) {
+                            continue;
+                        }
+
+                        // For NotAllowedError / SecurityError etc., retrying won't help much
+                        break;
+                    }
+                }
+
+                // All attempts failed
+                const name = lastError?.name || "UnknownError";
+                const msg = lastError?.message || String(lastError || "");
+                setBadge("bad", `Kamera/Scan Fehler: ${name}`);
+                console.log("Final camera error:", name, msg, lastError);
+
             } finally {
                 setButtonsDisabled(false);
                 busy = false;
